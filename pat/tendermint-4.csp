@@ -1,0 +1,421 @@
+﻿#import "PAT.Lib.Tendermint";
+
+#define N 4;	// number of nodes
+#define MINORITY 1;
+#define HALF 2;
+#define MAJORITY 3;
+#define R 2;	// number of rounds
+
+#define HONEST_VOTING 0;
+#define FORKING_VOTING 1;
+#define INVALID_BLOCK_VOTING 2;
+#define NO_VOTING 3; // CENSORSHIP ATTACK
+
+channel c01 0;
+channel c02 0;
+channel c03 0;
+channel c10 0;
+channel c12 0;
+channel c13 0;
+channel c20 0;
+channel c21 0;
+channel c23 0;
+channel c30 0;
+channel c31 0;
+channel c32 0;
+
+var signature0 = new Signature(0);
+var signature1 = new Signature(1);
+var signature2 = new Signature(2);
+var signature3 = new Signature(3);
+
+// global variables
+var proposer = 0;
+var round = 1;
+var votingBehaviour[N];
+var<Block> proposedBlock;
+var<ProposalList> proposalList;
+var<BlockList> lockedBlockList;
+var<SignatureList> sigList0;
+var<SignatureList> sigList1;
+var<SignatureList> sigList2;
+var<SignatureList> sigList3;
+var<VoteSet> prevote0;
+var<VoteSet> prevote1;
+var<VoteSet> prevote2;
+var<VoteSet> prevote3;
+var<VoteSet> precommit0;
+var<VoteSet> precommit1;
+var<VoteSet> precommit2;
+var<VoteSet> precommit3;
+var<BlockChain> chain0;
+var<BlockChain> chain1;
+var<BlockChain> chain2;
+var<BlockChain> chain3;
+var censor0;
+var censor1;
+var censor2;
+var censor3;
+
+// temporary global variables
+var<Block> tmpProposedBlock0;
+var<Proposal> tmpProposal0;
+var<Vote> tmpVote0;
+var<Block> tmpProposedBlock1;
+var<Proposal> tmpProposal1;
+var<Vote> tmpVote1;
+var<Block> tmpProposedBlock2;
+var<Proposal> tmpProposal2;
+var<Vote> tmpVote2;
+var<Block> tmpProposedBlock3;
+var<Proposal> tmpProposal3;
+var<Vote> tmpVote3;
+
+// This is the abstract sequence of the program for illustration purposes.
+// Propose(i); Proposed(i); Prevote(i); Prevoted(i); Precommit(i); Precommited(i); Commit(i);
+// It is required to build the dll file from PAT.Lib.Tendermint.cs before running the program.
+
+/* Step 1 - Propose Step: Proposer proposes a block and broadcasts it. Other nodes receive it. */
+Propose(i) = 
+	[proposer == i] proposeBlock.i {
+		proposedBlock = lockedBlockList.Get(i);
+		if(proposedBlock.GetHash() == -1) {
+			proposedBlock = new Block(i * 10);
+		}
+		proposalList.Set(i, new Proposal(proposedBlock, new Signature(i))) 
+	} -> ((	
+			[i == 0] (c01!proposalList.Get(i) -> Skip || c02!proposalList.Get(i) -> Skip || c03!proposalList.Get(i) -> Skip) []	//broadcast to other nodes
+			[i == 1] (c10!proposalList.Get(i) -> Skip || c12!proposalList.Get(i) -> Skip || c13!proposalList.Get(i) -> Skip) []
+			[i == 2] (c20!proposalList.Get(i) -> Skip || c21!proposalList.Get(i) -> Skip || c23!proposalList.Get(i) -> Skip) []
+			[i == 3] (c30!proposalList.Get(i) -> Skip || c31!proposalList.Get(i) -> Skip || c32!proposalList.Get(i) -> Skip)
+		); Skip)
+	[]
+	[i == 0] (c10?y -> {proposalList.Set(i, y)} -> Skip [] c20?y -> {proposalList.Set(i, y)} -> Skip [] c30?y -> {proposalList.Set(i, y)} -> Skip)  // receives from other nodes
+	[]
+	[i == 1] (c01?y -> {proposalList.Set(i, y)} -> Skip [] c21?y -> {proposalList.Set(i, y)} -> Skip [] c31?y -> {proposalList.Set(i, y)} -> Skip) 
+	[]
+	[i == 2] (c02?y -> {proposalList.Set(i, y)} -> Skip [] c12?y -> {proposalList.Set(i, y)} -> Skip [] c32?y -> {proposalList.Set(i, y)} -> Skip)
+	[]
+	[i == 3] (c03?y -> {proposalList.Set(i, y)} -> Skip [] c13?y -> {proposalList.Set(i, y)} -> Skip [] c23?y -> {proposalList.Set(i, y)} -> Skip);
+
+/* End of Step 1 - Propose Step: After the end of Propose step, it will proceed to Prevote Step */
+Prevote(i) = 
+	[i == 0] propose_end -> Prevote_0(); (
+								([censor0 == 0] (c01!tmpVote0 -> Skip || c02!tmpVote0-> Skip || c03!tmpVote0-> Skip) [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c10?y { prevote0.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								|| 
+								([censor2 == 0] c20?y { prevote0.Add(y) } -> Skip [] [censor2 == 1] Skip)
+								|| 
+								([censor3 == 0] c30?y { prevote0.Add(y) } -> Skip [] [censor3 == 1] Skip)
+							)
+	[]
+	[i == 1] propose_end -> Prevote_1(); (
+								([censor1 == 0] (c10!tmpVote1 -> Skip || c12!tmpVote1 -> Skip || c13!tmpVote1-> Skip) [] [censor1 == 1] Skip)
+								|| 
+								([censor0 == 0] c01?y { prevote1.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor2 == 0] c21?y { prevote1.Add(y) } -> Skip [] [censor2 == 1] Skip)					
+								||
+								([censor3 == 0] c31?y { prevote1.Add(y) } -> Skip [] [censor3 == 1] Skip)
+							)
+	[]
+	[i == 2] propose_end -> Prevote_2(); (
+								([censor2 == 0] (c20!tmpVote2 -> Skip || c21!tmpVote2 -> Skip || c23!tmpVote2-> Skip) [] [censor2 == 1] Skip)
+								|| 
+								([censor0 == 0] c02?y { prevote2.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c12?y { prevote2.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								|| 
+								([censor3 == 0] c32?y { prevote2.Add(y) } -> Skip [] [censor3 == 1] Skip)	
+							)
+	[]
+	[i == 3] propose_end -> Prevote_3(); (
+								([censor3 == 0] (c30!tmpVote3 -> Skip || c31!tmpVote3 -> Skip || c32!tmpVote3-> Skip) [] [censor3 == 1] Skip)
+								|| 
+								([censor0 == 0] c03?y { prevote3.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c13?y { prevote3.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								||
+								([censor2 == 0] c23?y { prevote3.Add(y) } -> Skip [] [censor2 == 1] Skip)
+							);
+
+/* Step 2 - Prevote Step: Each node validates the proposal block it received and votes accordingly */
+/* Malicoius voting behaviour is simulate here. Prevote_0, Prevote_1 and Prevote_2 have the same logic, the only difference is the internal variables that they use */
+Prevote_0() = 
+	validateProposal.0 {
+		tmpProposedBlock0 = lockedBlockList.Get(0);			// get locked block
+		if(tmpProposedBlock0.GetHash() == -1) {
+		 	// validate the proposed block
+			tmpProposal0 = proposalList.Get(0); 
+			tmpProposedBlock0 = tmpProposal0.GetBlock();	// get proposed block
+			var invalid = chain0.Contains(tmpProposedBlock0);
+			if(invalid) {
+				tmpProposedBlock0 = new Block();	// get NIL block
+			}
+		}
+		if(votingBehaviour[0] == HONEST_VOTING) tmpVote0 = new Vote(tmpProposedBlock0.GetHash(), signature0);		// honest voting -> votes what it received
+		else if(votingBehaviour[0] == FORKING_VOTING) tmpVote0 = new Vote(1000, signature0);						// forking voting -> votes an arbitary block
+		else if(votingBehaviour[0] == INVALID_BLOCK_VOTING) {tmpProposedBlock0 = chain0.Peek(); tmpVote0 = new Vote(tmpProposedBlock0.GetHash(), signature0);} //invalid voting -> votes and existing block in the chain
+		else if(votingBehaviour[0] == NO_VOTING) {censor0 = 1} 														// no voting -> do not broadcast
+		prevote0.Add(tmpVote0);
+	}  -> Skip;
+	
+Prevote_1() = 
+	validateProposal.1 {
+		tmpProposedBlock1 = lockedBlockList.Get(1);
+		if(tmpProposedBlock1.GetHash() == -1) { 
+			tmpProposal1 = proposalList.Get(1);
+			tmpProposedBlock1 = tmpProposal1.GetBlock();
+			var invalid = chain1.Contains(tmpProposedBlock1);
+			if(invalid) {
+				tmpProposedBlock1 = new Block();
+			}	
+		}
+		if(votingBehaviour[1] == HONEST_VOTING) tmpVote1 = new Vote(tmpProposedBlock1.GetHash(), signature1);
+		else if(votingBehaviour[1] == FORKING_VOTING) tmpVote1 = new Vote(1000, signature1);
+		else if(votingBehaviour[1] == INVALID_BLOCK_VOTING) {tmpProposedBlock1 = chain1.Peek(); tmpVote1 = new Vote(tmpProposedBlock1.GetHash(), signature1);}
+		else if(votingBehaviour[1] == NO_VOTING) {censor1 = 1}
+		prevote1.Add(tmpVote1);
+	} -> Skip;
+
+Prevote_2() = 
+	validateProposal.2 {
+		tmpProposedBlock2 = lockedBlockList.Get(2);
+		if(tmpProposedBlock2.GetHash() == -1) { 
+			tmpProposal2 = proposalList.Get(2);
+			tmpProposedBlock2 = tmpProposal2.GetBlock();
+			var invalid = chain2.Contains(tmpProposedBlock2);
+			if(invalid) {
+				tmpProposedBlock2 = new Block();
+			}
+			tmpVote2 = new Vote(tmpProposedBlock2.GetHash(), signature2);
+			if(votingBehaviour[2] == HONEST_VOTING) tmpVote2 = new Vote(tmpProposedBlock2.GetHash(), signature2);
+			else if(votingBehaviour[2] == FORKING_VOTING) tmpVote2 = new Vote(1000, signature2);
+			else if(votingBehaviour[2] == INVALID_BLOCK_VOTING) {tmpProposedBlock2 = chain2.Peek(); tmpVote2 = new Vote(tmpProposedBlock2.GetHash(), signature2);}
+			else if(votingBehaviour[2] == NO_VOTING) {censor2 = 1}
+			prevote2.Add(tmpVote2);
+		}
+	} ->  Skip;
+	
+Prevote_3() = 
+	validateProposal.3 {
+		tmpProposedBlock3 = lockedBlockList.Get(3);
+		if(tmpProposedBlock3.GetHash() == -1) { 
+			tmpProposal3 = proposalList.Get(3);
+			tmpProposedBlock3 = tmpProposal3.GetBlock();
+			var invalid = chain3.Contains(tmpProposedBlock3);
+			if(invalid) {
+				tmpProposedBlock3 = new Block();
+			}
+			tmpVote3 = new Vote(tmpProposedBlock3.GetHash(), signature3);
+			if(votingBehaviour[3] == HONEST_VOTING) tmpVote3 = new Vote(tmpProposedBlock3.GetHash(), signature3);
+			else if(votingBehaviour[3] == FORKING_VOTING) tmpVote3 = new Vote(1000, signature3);
+			else if(votingBehaviour[3] == INVALID_BLOCK_VOTING) {tmpProposedBlock3 = chain3.Peek(); tmpVote3 = new Vote(tmpProposedBlock3.GetHash(), signature3);}
+			else if(votingBehaviour[3] == NO_VOTING) {censor3 = 1}
+			prevote3.Add(tmpVote3);
+		}
+	} ->  Skip;
+
+/* End of Step 2 - Prevote Step: After the end of Prevote step, it will proceed to Precommit Step */
+Precommit(i) =
+	[i == 0] prevote_end -> Precommit_0(); (
+								([censor0 == 0] (c01!tmpVote0 -> Skip || c02!tmpVote0-> Skip || c03!tmpVote0-> Skip) [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c10?y { precommit0.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								|| 
+								([censor2 == 0] c20?y { precommit0.Add(y) } -> Skip [] [censor2 == 1] Skip)
+								|| 
+								([censor3 == 0] c30?y { precommit0.Add(y) } -> Skip [] [censor3 == 1] Skip)
+							)
+	[]
+	[i == 1] prevote_end -> Precommit_1(); (
+								([censor1 == 0] (c10!tmpVote1 -> Skip || c12!tmpVote1 -> Skip || c13!tmpVote1-> Skip) [] [censor1 == 1] Skip)
+								|| 
+								([censor0 == 0] c01?y { precommit1.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor2 == 0] c21?y { precommit1.Add(y) } -> Skip [] [censor2 == 1] Skip)					
+								||
+								([censor3 == 0] c31?y { precommit1.Add(y) } -> Skip [] [censor3 == 1] Skip)
+							)
+	[]
+	[i == 2] prevote_end -> Precommit_2(); (
+								([censor2 == 0] (c20!tmpVote2 -> Skip || c21!tmpVote2 -> Skip || c23!tmpVote2-> Skip) [] [censor2 == 1] Skip)
+								|| 
+								([censor0 == 0] c02?y { precommit2.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c12?y { precommit2.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								|| 
+								([censor3 == 0] c32?y { precommit2.Add(y) } -> Skip [] [censor3 == 1] Skip)	
+							)
+	[]
+	[i == 3] prevote_end -> Precommit_3(); (
+								([censor3 == 0] (c30!tmpVote3 -> Skip || c31!tmpVote3 -> Skip || c32!tmpVote3-> Skip) [] [censor3 == 1] Skip)
+								|| 
+								([censor0 == 0] c03?y { precommit3.Add(y) } -> Skip [] [censor0 == 1] Skip)
+								|| 
+								([censor1 == 0] c13?y { precommit3.Add(y) } -> Skip [] [censor1 == 1] Skip)
+								||
+								([censor2 == 0] c23?y { precommit3.Add(y) } -> Skip [] [censor2 == 1] Skip)	
+							);
+
+/* Step 3 - Precommit Step: Each node validates the prevote it received and votes the block with 67% consensus */
+/* Precommit_0, Precommit_1 and Precommit_2 have the same logic, the only difference is the internal variables that they use */
+Precommit_0() = 
+	validateVote.0 {
+		tmpProposedBlock0 = prevote0.GetFirstBlockWithMinSupport(MAJORITY);
+		lockedBlockList.Set(0, tmpProposedBlock0);
+		tmpVote0 = new Vote(tmpProposedBlock0.GetHash(), signature0);	// sign block
+		precommit0.Add(tmpVote0);
+	} -> Skip;
+	
+Precommit_1() = 
+	validateVote.1 {
+		tmpProposedBlock1 = prevote1.GetFirstBlockWithMinSupport(MAJORITY);
+		lockedBlockList.Set(1, tmpProposedBlock1);
+		tmpVote1 = new Vote(tmpProposedBlock1.GetHash(), signature1);	// sign block
+		precommit1.Add(tmpVote1);
+	} -> Skip;
+	
+Precommit_2() = 
+	validateVote.2 {
+		tmpProposedBlock2 = prevote2.GetFirstBlockWithMinSupport(MAJORITY);
+		lockedBlockList.Set(2, tmpProposedBlock2);
+		tmpVote2 = new Vote(tmpProposedBlock2.GetHash(), signature2);	// sign block
+		precommit2.Add(tmpVote2);
+	} -> Skip;
+	
+Precommit_3() = 
+	validateVote.3 {
+		tmpProposedBlock3 = prevote3.GetFirstBlockWithMinSupport(MAJORITY);
+		lockedBlockList.Set(3, tmpProposedBlock3);
+		tmpVote3 = new Vote(tmpProposedBlock3.GetHash(), signature3);	// sign block
+		precommit3.Add(tmpVote3);
+	} -> Skip;
+
+/* End of Step 3 - Precommit Step: After the end of Precommit step, it will proceed to Commit Step */
+PreparePOL(i) =
+	[i == 0] precommit_end -> prepare_proof_of_lock.0 {
+		tmpProposedBlock0 = lockedBlockList.Get(0);
+		sigList0 = precommit0.getSignaturesForBlock(tmpProposedBlock0.GetHash());
+		tmpProposedBlock0.SetSignatureList(sigList0);
+	} -> polCompleted -> Skip
+	[]
+	[i == 1] precommit_end -> prepare_proof_of_lock.1 {
+		tmpProposedBlock1 = lockedBlockList.Get(1);
+		sigList1 = precommit1.getSignaturesForBlock(tmpProposedBlock1.GetHash());
+		tmpProposedBlock1.SetSignatureList(sigList1);
+	} -> polCompleted -> Skip
+	[]
+	[i == 2] precommit_end -> prepare_proof_of_lock.2 {
+		tmpProposedBlock2 = lockedBlockList.Get(2);
+		sigList2 = precommit2.getSignaturesForBlock(tmpProposedBlock2.GetHash());
+		tmpProposedBlock2.SetSignatureList(sigList2);
+	} -> polCompleted -> Skip
+	[]
+	[i == 3] precommit_end -> prepare_proof_of_lock.3 {
+		tmpProposedBlock3 = lockedBlockList.Get(3);
+		sigList3 = precommit3.getSignaturesForBlock(tmpProposedBlock3.GetHash());
+		tmpProposedBlock3.SetSignatureList(sigList3);
+	} -> polCompleted -> Skip;
+
+/* Step 4 - Commit Step: Add the precommited block with 67% consensus to the chain*/
+Commit(i) = 
+	[i == 0] addtoChain.i {
+		tmpProposedBlock0 = precommit0.GetFirstBlockWithMinSupport(MAJORITY);
+		if(tmpProposedBlock0.GetHash() != -1) {
+			chain0.Add(tmpProposedBlock0)
+		}
+	} -> Skip
+	[]
+	[i == 1] addtoChain.i {
+		tmpProposedBlock1 = precommit1.GetFirstBlockWithMinSupport(MAJORITY); 
+		if(tmpProposedBlock1.GetHash() != -1) {
+			chain1.Add(tmpProposedBlock1)
+		}
+	} -> Skip
+	[]
+	[i == 2] addtoChain.i {
+		tmpProposedBlock2 = precommit2.GetFirstBlockWithMinSupport(MAJORITY);
+		if(tmpProposedBlock2.GetHash() != -1) {
+			chain2.Add(tmpProposedBlock2)
+		}
+	} -> Skip
+	[]
+	[i == 3] addtoChain.i {
+		tmpProposedBlock3 = precommit3.GetFirstBlockWithMinSupport(MAJORITY);
+		if(tmpProposedBlock3.GetHash() != -1) {
+			chain3.Add(tmpProposedBlock3)
+		}
+	} -> Skip;
+
+/* Choose the next proposer, using the round robin approach, currently the order is fixed */
+NextRound() = 
+	[round < R] setNextProposer {
+		round++;
+		proposer = (proposer+1) % N;
+		prevote0.Clear(); prevote1.Clear(); prevote2.Clear(); prevote3.Clear(); 
+		precommit0.Clear(); precommit1.Clear(); precommit2.Clear(); precommit3.Clear();
+		lockedBlockList.Clear();
+	} -> BlockChain()
+	[]
+	[round >= R] Skip;
+
+/* Simulate a node i to perform malicious voting behaviour b */
+SimulateMalicious(i, b) = {
+	var x = 0; var count = 0;
+	while (count < i) {
+		if(x != proposer) {
+			votingBehaviour[x] = b;
+			count ++;
+		}
+		x = (x + 1) % N;
+	} 
+} -> Skip;
+
+BlockChain() = (||x:{0..N-1}@(Propose(x);Prevote(x);Precommit(x);PreparePOL(x);Commit(x))); NextRound();
+BlockChainWithMinorityForking() = SimulateMalicious(MINORITY, FORKING_VOTING); BlockChain();
+BlockChainWithHalfForking() = SimulateMalicious(HALF, FORKING_VOTING); BlockChain();
+BlockChainWithMajorityForking() = SimulateMalicious(MAJORITY, FORKING_VOTING); BlockChain();
+BlockChainWithMinorityInvalid() = SimulateMalicious(MINORITY, INVALID_BLOCK_VOTING); BlockChain();
+BlockChainWithHalfInvalid() = SimulateMalicious(HALF, FORKING_VOTING); BlockChain();
+BlockChainWithMajorityInvalid() = SimulateMalicious(MAJORITY, INVALID_BLOCK_VOTING); BlockChain();
+BlockChainWithMinorityCensor() = SimulateMalicious(MINORITY, NO_VOTING); BlockChain();
+BlockChainWithHalfCensor() = SimulateMalicious(HALF, NO_VOTING); BlockChain();
+BlockChainWithMajorityCensor() = SimulateMalicious(MAJORITY, NO_VOTING); BlockChain();
+
+#define Consensus (!chain0.IsEmpty() && chain0.Peek() == chain1.Peek() && chain1.Peek() == chain2.Peek() && chain2.Peek() == chain3.Peek());
+#define ImmuneToForkingAttack (round > 1 && !Consensus) || (Consensus && proposedBlock == chain0.Peek());
+#define ImmuneToInvalidBlockInsertion (round>1 && !chain0.ContainsDuplicates() && !chain1.ContainsDuplicates() && !chain2.ContainsDuplicates() && !chain3.ContainsDuplicates());
+
+#assert BlockChain() deadlockfree;
+#assert BlockChainWithMinorityForking() deadlockfree;
+#assert BlockChainWithHalfForking() deadlockfree;
+#assert BlockChainWithMajorityForking() deadlockfree;
+#assert BlockChainWithMinorityInvalid() deadlockfree;
+#assert BlockChainWithHalfInvalid() deadlockfree;
+#assert BlockChainWithMajorityInvalid() deadlockfree;
+#assert BlockChainWithMinorityCensor() deadlockfree;
+#assert BlockChainWithHalfCensor() deadlockfree;
+#assert BlockChainWithMajorityCensor() deadlockfree;
+
+#assert BlockChain() reaches Consensus;
+#assert BlockChainWithMinorityForking() reaches Consensus;
+#assert BlockChainWithHalfForking() reaches Consensus;
+#assert BlockChainWithMajorityForking() reaches Consensus;
+#assert BlockChainWithMinorityInvalid() reaches Consensus;
+#assert BlockChainWithHalfInvalid() reaches Consensus;
+#assert BlockChainWithMajorityInvalid() reaches Consensus;
+#assert BlockChainWithMinorityCensor() reaches Consensus;
+#assert BlockChainWithHalfCensor() reaches Consensus;
+#assert BlockChainWithMajorityCensor() reaches Consensus;
+
+#assert BlockChain() reaches ImmuneToForkingAttack;
+#assert BlockChainWithMinorityForking() reaches ImmuneToForkingAttack;
+#assert BlockChainWithHalfForking() reaches ImmuneToForkingAttack;
+#assert BlockChainWithMajorityForking() reaches ImmuneToForkingAttack;
+
+#assert BlockChain() reaches ImmuneToInvalidBlockInsertion;
+#assert BlockChainWithMinorityInvalid() reaches ImmuneToInvalidBlockInsertion;
+#assert BlockChainWithHalfInvalid() reaches ImmuneToInvalidBlockInsertion;
+#assert BlockChainWithMajorityInvalid() reaches ImmuneToInvalidBlockInsertion;
